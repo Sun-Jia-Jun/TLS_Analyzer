@@ -23,6 +23,7 @@ private:
     std::string output_csv_path = "../data/tls_features.csv"; // 输出CSV文件路径
     std::string label_map_path = "../data/site_labels.csv";   // 输出标签映射文件路径
     int sample_count = 0;                                     // 样本数量计数器
+    int max_records_in_sample = -1;                           // 每个样本最多TLS记录数量，用于构建CNN输入向量
 
 public:
     TLSRecordToCsv(Parser &parser_ref, const std::string &output_dir = "../output")
@@ -49,7 +50,7 @@ public:
             return false;
         }
 
-        // 写入CSV头部
+        // 写入列标签
         ofs << "site_label,packet_features" << std::endl;
 
         // 从Parser获取所有TLS记录
@@ -58,17 +59,14 @@ public:
         // 遍历每个站点
         for (const auto &site_pair : records_map)
         {
-            const std::string &path = site_pair.first;
-            const auto &site_files = site_pair.second;
+            std::string site_name = site_pair.first;
+            int site_label = site_labels[site_name];
 
-            // 提取真正的站点名称
-            std::string real_site_name = extract_real_site_name(path);
-            int site_label = site_labels[real_site_name];
+            const auto &site_files = site_pair.second;
 
             // 遍历该站点的每个pcap文件
             for (const auto &file_pair : site_files)
             {
-                const std::string &file_name = file_pair.first;
                 const auto &tls_records = file_pair.second;
 
                 // 将单个pcap文件的所有TLS记录转换为一个特征向量
@@ -101,18 +99,7 @@ private:
     {
         auto &records_map = parser.get_tls_records_map();
 
-        // 先提取所有真实的站点名称
-        // std::unordered_set<std::string> unique_sites;
-
-        // for (const auto &site_pair : records_map)
-        // {
-        //     const std::string &path = site_pair.first;
-            // 从路径中提取真正的站点名称（例如 baidu、bing、bilibili）
-        //     std::string site_name = extract_real_site_name(path);
-        //     unique_sites.insert(site_name);
-        // }
-
-        //*
+        // 从DomainManager加载所有域名，并分配标签
         std::unordered_set<std::string> unique_sites;
         std::vector<std::string> domains = DomainManager::instance()->get_domains();
         for (const auto &domain : domains)
@@ -121,7 +108,6 @@ private:
             unique_sites.insert(site_name);
         }
 
-        // 为每个站点分配标签
         int label = 0;
         for (const auto &site : unique_sites)
         {
@@ -134,27 +120,6 @@ private:
             std::cout << pair.first << "(" << pair.second << ") ";
         }
         std::cout << std::endl;
-    }
-
-    // 从路径中提取真正的站点名称
-    std::string extract_real_site_name(const std::string &path)
-    {
-        // 示例: 从 "/data/bilibili/1747667024402554981" 提取 "bilibili"
-        size_t first_slash = path.find('/');
-        if (first_slash == std::string::npos)
-            first_slash = 0;
-        else
-            first_slash += 1; // 跳过第一个斜杠
-
-        size_t second_slash = path.find('/', first_slash);
-        if (second_slash == std::string::npos)
-            return path;
-
-        size_t third_slash = path.find('/', second_slash + 1);
-        if (third_slash == std::string::npos)
-            third_slash = path.length();
-
-        return path.substr(second_slash + 1, third_slash - second_slash - 1);
     }
 
     // 生成标签映射文件
@@ -191,6 +156,7 @@ private:
     // 将TLS记录转换为特征字符串
     std::string convert_tls_records_to_feature_string(const std::vector<TLSRecord> &records)
     {
+        // 一个pcap中的所有TLSRecord -> 387_0;1492_1;1000_1;198_0;298_1;233_0;1492_1;169_1 ...
         if (records.empty())
         {
             return "";
@@ -263,6 +229,27 @@ private:
             return url;
         }
     }
-};
 
+    void set_max_records_in_sample()
+    {
+        // 每个样本中的tls记录数为std::vector<TLSRecord>.size()
+        auto &records_map = parser.get_tls_records_map();
+        for (const auto &site_pair : records_map)
+        {
+            for (const auto &file_pair : site_pair.second)
+            {
+                const auto &tls_records = file_pair.second;
+                if (tls_records.size() > max_records_in_sample)
+                {
+                    max_records_in_sample = tls_records.size();
+                }
+            }
+        }
+        std::cout << "[INFO] Max records in sample is : " << max_records_in_sample << std::endl;
+    }
+
+public:
+    // Getter
+    const int get_max_records_in_sample() const { return max_records_in_sample; }
+};
 #endif // _TLSRECORD_TO_CSV_HPP_

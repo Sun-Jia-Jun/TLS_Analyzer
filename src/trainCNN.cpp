@@ -10,7 +10,8 @@
 const float LEARNING_RATE = 0.01f;
 const int EPOCHS = 50;
 const int BATCH_SIZE = 32;
-const std::string MODEL_PATH = "../data/tls_model.bin";
+
+const std::string MODEL_PATH = "../model/tls_model.bin";
 
 int main()
 {
@@ -20,84 +21,84 @@ int main()
 
         // 加载并预处理数据
         std::cout << "[INFO] Loading and preprocessing data..." << std::endl;
-        TLSDataProcessor dataProcessor("../data/tls_features.csv");
+        TLSDataProcessor data_processor("../output/tls_features.csv");
 
-        int featureDim = dataProcessor.getFeatureDim();
-        int numLabels = dataProcessor.getNumLabels();
+        int feature_dim = data_processor.get_feature_dim();
+        int num_labels = data_processor.get_num_labels();
 
-        std::cout << "[INFO] Feature dimension: " << featureDim << std::endl;
-        std::cout << "[INFO] Number of classes: " << numLabels << std::endl;
+        std::cout << "[INFO] Feature dimension: " << feature_dim << std::endl;
+        std::cout << "[INFO] Number of classes: " << num_labels << std::endl;
 
         // 创建CNN模型
-        SimpleCNN model(featureDim, numLabels);
+        SimpleCNN model(feature_dim, num_labels);
 
         // 获取训练集和测试集
-        const auto &trainSamples = dataProcessor.getTrainSamples();
-        const auto &testSamples = dataProcessor.getTestSamples();
+        const auto &train_samples = data_processor.get_train_samples();
+        const auto &test_samples = data_processor.get_test_samples();
 
         std::cout << "[INFO] Starting training..." << std::endl;
 
         // 训练
-        auto startTime = std::chrono::high_resolution_clock::now();
+        auto start_time = std::chrono::high_resolution_clock::now();
 
         for (int epoch = 0; epoch < EPOCHS; ++epoch)
         {
-            float epochLoss = 0.0f;
-            int numBatches = 0;
+            float epoch_loss = 0.0f;
+            int num_batches = 0;
 
             // 随机打乱训练样本
-            std::vector<Sample> shuffledSamples = trainSamples;
+            std::vector<Sample> shuffled_samples = train_samples;
             std::random_device rd;
             std::mt19937 g(rd());
-            std::shuffle(shuffledSamples.begin(), shuffledSamples.end(), g);
+            std::shuffle(shuffled_samples.begin(), shuffled_samples.end(), g);
 
             // 批次训练
-            for (size_t i = 0; i < shuffledSamples.size(); i += BATCH_SIZE)
+            for (size_t i = 0; i < shuffled_samples.size(); i += BATCH_SIZE)
             {
-                size_t batchSize = std::min(BATCH_SIZE, static_cast<int>(shuffledSamples.size() - i));
-                std::vector<Sample> batch(shuffledSamples.begin() + i,
-                                          shuffledSamples.begin() + i + batchSize);
+                size_t batch_size = std::min(BATCH_SIZE, static_cast<int>(shuffled_samples.size() - i));
+                std::vector<Sample> batch(shuffled_samples.begin() + i,
+                                          shuffled_samples.begin() + i + batch_size);
 
-                float batchLoss = model.trainBatch(batch, LEARNING_RATE);
-                epochLoss += batchLoss;
-                numBatches++;
+                float batch_loss = model.train_batch(batch, LEARNING_RATE);
+                epoch_loss += batch_loss;
+                num_batches++;
             }
 
-            epochLoss /= numBatches;
+            epoch_loss /= num_batches;
 
             // 评估
-            float trainAcc = model.evaluate(trainSamples);
-            float testAcc = model.evaluate(testSamples);
+            float train_acc = model.evaluate(train_samples);
+            float test_acc = model.evaluate(test_samples);
 
             std::cout << "Epoch " << std::setw(3) << epoch + 1
-                      << ", Loss: " << std::fixed << std::setprecision(4) << epochLoss
-                      << ", Train Acc: " << std::fixed << std::setprecision(2) << (trainAcc * 100) << "%"
-                      << ", Test Acc: " << std::fixed << std::setprecision(2) << (testAcc * 100) << "%"
+                      << ", Loss: " << std::fixed << std::setprecision(4) << epoch_loss
+                      << ", Train Acc: " << std::fixed << std::setprecision(2) << (train_acc * 100) << "%"
+                      << ", Test Acc: " << std::fixed << std::setprecision(2) << (test_acc * 100) << "%"
                       << std::endl;
 
             // 提前停止
-            if (trainAcc > 0.99f && testAcc > 0.95f)
+            if (train_acc > 0.99f && test_acc > 0.95f)
             {
                 std::cout << "[INFO] Early stopping at epoch " << epoch + 1 << std::endl;
                 break;
             }
         }
 
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime).count();
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
         std::cout << "[INFO] Training completed in " << duration << " seconds." << std::endl;
 
         // 最终评估
-        float finalTrainAcc = model.evaluate(trainSamples);
-        float finalTestAcc = model.evaluate(testSamples);
+        float final_train_acc = model.evaluate(train_samples);
+        float final_test_acc = model.evaluate(test_samples);
 
         std::cout << "Final Train Accuracy: " << std::fixed << std::setprecision(2)
-                  << (finalTrainAcc * 100) << "%" << std::endl;
+                  << (final_train_acc * 100) << "%" << std::endl;
         std::cout << "Final Test Accuracy: " << std::fixed << std::setprecision(2)
-                  << (finalTestAcc * 100) << "%" << std::endl;
+                  << (final_test_acc * 100) << "%" << std::endl;
 
         // 保存模型
-        model.saveModel(MODEL_PATH);
+        model.save_model(MODEL_PATH);
 
         return 0;
     }

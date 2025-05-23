@@ -1,3 +1,5 @@
 www.baidu.com
 www.bing.com
 www.bilibili.com
+www.csdn.net
+www.hareu.edu.cn

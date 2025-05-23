@@ -27,7 +27,7 @@ public:
     }
 
     // ReLU导数
-    static std::vector<float> reluDerivative(const std::vector<float> &x)
+    static std::vector<float> relu_derivative(const std::vector<float> &x)
     {
         std::vector<float> result(x.size());
         for (size_t i = 0; i < x.size(); ++i)
@@ -43,12 +43,12 @@ public:
         std::vector<float> result(x.size());
 
         // 为了数值稳定性，减去最大值
-        float maxVal = *std::max_element(x.begin(), x.end());
+        float max_val = *std::max_element(x.begin(), x.end());
 
         float sum = 0.0f;
         for (size_t i = 0; i < x.size(); ++i)
         {
-            result[i] = std::exp(x[i] - maxVal);
+            result[i] = std::exp(x[i] - max_val);
             sum += result[i];
         }
 
@@ -66,11 +66,11 @@ public:
 class ConvLayer
 {
 private:
-    int inputChannels;  // 输入通道数
-    int outputChannels; // 输出通道数
-    int kernelSize;     // 卷积核大小
-    int stride;         // 步长
-    int padding;        // 填充
+    int input_channels;  // 输入通道数
+    int output_channels; // 输出通道数
+    int kernel_size;     // 卷积核大小
+    int stride;          // 步长
+    int padding;         // 填充
 
     std::vector<std::vector<std::vector<float>>> weights; // 权重
     std::vector<float> biases;                            // 偏置
@@ -80,9 +80,9 @@ private:
     std::vector<float> output;
 
 public:
-    ConvLayer(int inChannels, int outChannels, int kernelSize, int stride = 1, int padding = 0)
-        : inputChannels(inChannels), outputChannels(outChannels),
-          kernelSize(kernelSize), stride(stride), padding(padding)
+    ConvLayer(int in_channels, int out_channels, int kernel_size, int stride = 1, int padding = 0)
+        : input_channels(in_channels), output_channels(out_channels),
+          kernel_size(kernel_size), stride(stride), padding(padding)
     {
 
         // 随机初始化权重
@@ -91,14 +91,14 @@ public:
         std::normal_distribution<float> dist(0.0f, 0.1f);
 
         // 初始化卷积核
-        weights.resize(outputChannels);
-        for (int oc = 0; oc < outputChannels; ++oc)
+        weights.resize(output_channels);
+        for (int oc = 0; oc < output_channels; ++oc)
         {
-            weights[oc].resize(inputChannels);
-            for (int ic = 0; ic < inputChannels; ++ic)
+            weights[oc].resize(input_channels);
+            for (int ic = 0; ic < input_channels; ++ic)
             {
-                weights[oc][ic].resize(kernelSize);
-                for (int k = 0; k < kernelSize; ++k)
+                weights[oc][ic].resize(kernel_size);
+                for (int k = 0; k < kernel_size; ++k)
                 {
                     weights[oc][ic][k] = dist(gen);
                 }
@@ -106,7 +106,7 @@ public:
         }
 
         // 初始化偏置
-        biases.resize(outputChannels, 0.0f);
+        biases.resize(output_channels, 0.0f);
     }
 
     // 前向传播
@@ -114,39 +114,39 @@ public:
     {
         this->input = input;
 
-        int inputWidth = input.size() / inputChannels;
-        int outputWidth = (inputWidth + 2 * padding - kernelSize) / stride + 1;
+        int input_width = input.size() / input_channels;
+        int output_width = (input_width + 2 * padding - kernel_size) / stride + 1;
 
         // 初始化输出
-        output.resize(outputChannels * outputWidth, 0.0f);
+        output.resize(output_channels * output_width, 0.0f);
 
         // 对每个输出通道进行卷积
-        for (int oc = 0; oc < outputChannels; ++oc)
+        for (int oc = 0; oc < output_channels; ++oc)
         {
-            for (int ow = 0; ow < outputWidth; ++ow)
+            for (int ow = 0; ow < output_width; ++ow)
             {
                 float sum = biases[oc];
 
                 // 卷积核位置
-                int startW = ow * stride - padding;
+                int start_w = ow * stride - padding;
 
                 // 对每个输入通道进行卷积
-                for (int ic = 0; ic < inputChannels; ++ic)
+                for (int ic = 0; ic < input_channels; ++ic)
                 {
-                    for (int k = 0; k < kernelSize; ++k)
+                    for (int k = 0; k < kernel_size; ++k)
                     {
-                        int w = startW + k;
+                        int w = start_w + k;
 
                         // 检查边界
-                        if (w >= 0 && w < inputWidth)
+                        if (w >= 0 && w < input_width)
                         {
-                            int inputIdx = ic * inputWidth + w;
-                            sum += input[inputIdx] * weights[oc][ic][k];
+                            int input_idx = ic * input_width + w;
+                            sum += input[input_idx] * weights[oc][ic][k];
                         }
                     }
                 }
 
-                output[oc * outputWidth + ow] = sum;
+                output[oc * output_width + ow] = sum;
             }
         }
 
@@ -154,77 +154,77 @@ public:
     }
 
     // 反向传播
-    std::vector<float> backward(const std::vector<float> &gradient, float learningRate)
+    std::vector<float> backward(const std::vector<float> &gradient, float learning_rate)
     {
-        int inputWidth = input.size() / inputChannels;
-        int outputWidth = output.size() / outputChannels;
+        int input_width = input.size() / input_channels;
+        int output_width = output.size() / output_channels;
 
         // 初始化输入梯度
-        std::vector<float> inputGradient(input.size(), 0.0f);
+        std::vector<float> input_gradient(input.size(), 0.0f);
 
         // 更新卷积核权重
-        for (int oc = 0; oc < outputChannels; ++oc)
+        for (int oc = 0; oc < output_channels; ++oc)
         {
-            for (int ic = 0; ic < inputChannels; ++ic)
+            for (int ic = 0; ic < input_channels; ++ic)
             {
-                for (int k = 0; k < kernelSize; ++k)
+                for (int k = 0; k < kernel_size; ++k)
                 {
-                    float weightGradient = 0.0f;
+                    float weight_gradient = 0.0f;
 
-                    for (int ow = 0; ow < outputWidth; ++ow)
+                    for (int ow = 0; ow < output_width; ++ow)
                     {
-                        int startW = ow * stride - padding;
-                        int w = startW + k;
+                        int start_w = ow * stride - padding;
+                        int w = start_w + k;
 
-                        if (w >= 0 && w < inputWidth)
+                        if (w >= 0 && w < input_width)
                         {
-                            int gradientIdx = oc * outputWidth + ow;
-                            int inputIdx = ic * inputWidth + w;
-                            weightGradient += gradient[gradientIdx] * input[inputIdx];
+                            int gradient_idx = oc * output_width + ow;
+                            int input_idx = ic * input_width + w;
+                            weight_gradient += gradient[gradient_idx] * input[input_idx];
                         }
                     }
 
-                    weights[oc][ic][k] -= learningRate * weightGradient;
+                    weights[oc][ic][k] -= learning_rate * weight_gradient;
                 }
             }
         }
 
         // 更新偏置
-        for (int oc = 0; oc < outputChannels; ++oc)
+        for (int oc = 0; oc < output_channels; ++oc)
         {
-            float biasGradient = 0.0f;
-            for (int ow = 0; ow < outputWidth; ++ow)
+            float bias_gradient = 0.0f;
+            for (int ow = 0; ow < output_width; ++ow)
             {
-                biasGradient += gradient[oc * outputWidth + ow];
+                bias_gradient += gradient[oc * output_width + ow];
             }
-            biases[oc] -= learningRate * biasGradient;
+            biases[oc] -= learning_rate * bias_gradient;
         }
 
         // 计算输入梯度（用于反向传播到前一层）
-        for (int ic = 0; ic < inputChannels; ++ic)
+        for (int ic = 0; ic < input_channels; ++ic)
         {
-            for (int iw = 0; iw < inputWidth; ++iw)
+            for (int iw = 0; iw < input_width; ++iw)
             {
                 float g = 0.0f;
 
-                for (int oc = 0; oc < outputChannels; ++oc)
+                for (int oc = 0; oc < output_channels; ++oc)
                 {
-                    for (int k = 0; k < kernelSize; ++k)
+                    for (int k = 0; k < kernel_size; ++k)
                     {
                         int ow = (iw + padding - k) / stride;
 
-                        if ((iw + padding - k) % stride == 0 && ow >= 0 && ow < outputWidth)
+                        if ((iw + padding - k) % stride == 0 && ow >= 0 && ow < output_width)
                         {
-                            g += gradient[oc * outputWidth + ow] * weights[oc][ic][k];
+                            g += gradient[oc * output_width + ow] * weights[oc][ic][k];
                         }
                     }
                 }
 
-                inputGradient[ic * inputWidth + iw] = g;
+                input_gradient[ic * input_width + iw] = g;
             }
         }
 
-        return inputGradient;
+        return input_gradient;
     }
 };
 
@@ -232,8 +232,8 @@ public:
 class FCLayer
 {
 private:
-    int inputSize;
-    int outputSize;
+    int input_size;
+    int output_size;
 
     std::vector<std::vector<float>> weights;
     std::vector<float> biases;
@@ -242,39 +242,39 @@ private:
     std::vector<float> output;
 
 public:
-    FCLayer(int inputSize, int outputSize) : inputSize(inputSize), outputSize(outputSize)
+    FCLayer(int input_size, int output_size) : input_size(input_size), output_size(output_size)
     {
         // Xavier初始化
-        float scale = std::sqrt(6.0f / (inputSize + outputSize));
+        float scale = std::sqrt(6.0f / (input_size + output_size));
 
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dist(-scale, scale);
 
         // 初始化权重
-        weights.resize(outputSize, std::vector<float>(inputSize));
-        for (int o = 0; o < outputSize; ++o)
+        weights.resize(output_size, std::vector<float>(input_size));
+        for (int o = 0; o < output_size; ++o)
         {
-            for (int i = 0; i < inputSize; ++i)
+            for (int i = 0; i < input_size; ++i)
             {
                 weights[o][i] = dist(gen);
             }
         }
 
         // 初始化偏置
-        biases.resize(outputSize, 0.0f);
+        biases.resize(output_size, 0.0f);
     }
 
     // 前向传播
     std::vector<float> forward(const std::vector<float> &input)
     {
         this->input = input;
-        output.resize(outputSize);
+        output.resize(output_size);
 
-        for (int o = 0; o < outputSize; ++o)
+        for (int o = 0; o < output_size; ++o)
         {
             float sum = biases[o];
-            for (int i = 0; i < inputSize; ++i)
+            for (int i = 0; i < input_size; ++i)
             {
                 sum += weights[o][i] * input[i];
             }
@@ -285,22 +285,22 @@ public:
     }
 
     // 反向传播
-    std::vector<float> backward(const std::vector<float> &gradient, float learningRate)
+    std::vector<float> backward(const std::vector<float> &gradient, float learning_rate)
     {
-        std::vector<float> inputGradient(inputSize, 0.0f);
+        std::vector<float> input_gradient(input_size, 0.0f);
 
         // 更新权重和偏置
-        for (int o = 0; o < outputSize; ++o)
+        for (int o = 0; o < output_size; ++o)
         {
-            for (int i = 0; i < inputSize; ++i)
+            for (int i = 0; i < input_size; ++i)
             {
-                weights[o][i] -= learningRate * gradient[o] * input[i];
-                inputGradient[i] += gradient[o] * weights[o][i];
+                weights[o][i] -= learning_rate * gradient[o] * input[i];
+                input_gradient[i] += gradient[o] * weights[o][i];
             }
-            biases[o] -= learningRate * gradient[o];
+            biases[o] -= learning_rate * gradient[o];
         }
 
-        return inputGradient;
+        return input_gradient;
     }
 };
 
@@ -308,19 +308,19 @@ public:
 class SimpleCNN
 {
 private:
-    int inputDim;
-    int numLabels;
+    int input_dim;
+    int num_labels;
 
     ConvLayer conv1;
     FCLayer fc1;
     FCLayer fc2;
 
 public:
-    SimpleCNN(int inputDim, int numLabels)
-        : inputDim(inputDim), numLabels(numLabels),
-          conv1(1, 16, 5, 2),           // 输入通道1，输出通道16，卷积核大小5，步长2
-          fc1((inputDim / 2) * 16, 64), // 降采样后的特征维度 * 通道数 -> 64
-          fc2(64, numLabels)            // 64 -> 类别数
+    SimpleCNN(int input_dim, int num_labels)
+        : input_dim(input_dim), num_labels(num_labels),
+          conv1(1, 16, 5, 2),            // 输入通道1，输出通道16，卷积核大小5，步长2
+          fc1((input_dim / 2) * 16, 64), // 降采样后的特征维度 * 通道数 -> 64
+          fc2(64, num_labels)            // 64 -> 类别数
     {
     }
 
@@ -328,26 +328,26 @@ public:
     std::vector<float> forward(const std::vector<float> &input)
     {
         // 卷积层 + ReLU
-        auto conv1Out = Activation::relu(conv1.forward(input));
+        auto conv1_out = Activation::relu(conv1.forward(input));
 
         // 全连接层 + ReLU
-        auto fc1Out = Activation::relu(fc1.forward(conv1Out));
+        auto fc1_out = Activation::relu(fc1.forward(conv1_out));
 
         // 输出层 + Softmax
-        auto logits = fc2.forward(fc1Out);
+        auto logits = fc2.forward(fc1_out);
         return Activation::softmax(logits);
     }
 
     // 计算交叉熵损失
-    float computeLoss(const std::vector<float> &output, int label)
+    float compute_loss(const std::vector<float> &output, int label)
     {
         return -std::log(std::max(output[label], 1e-7f));
     }
 
     // 训练一个批次
-    float trainBatch(const std::vector<Sample> &batch, float learningRate)
+    float train_batch(const std::vector<Sample> &batch, float learning_rate)
     {
-        float totalLoss = 0.0f;
+        float total_loss = 0.0f;
 
         for (const auto &sample : batch)
         {
@@ -355,23 +355,23 @@ public:
             auto output = forward(sample.features);
 
             // 计算损失
-            totalLoss += computeLoss(output, sample.label);
+            total_loss += compute_loss(output, sample.label);
 
             // 计算输出层梯度
-            std::vector<float> gradient(numLabels, 0.0f);
-            for (int i = 0; i < numLabels; ++i)
+            std::vector<float> gradient(num_labels, 0.0f);
+            for (int i = 0; i < num_labels; ++i)
             {
                 gradient[i] = output[i];
             }
             gradient[sample.label] -= 1.0f;
 
             // 反向传播
-            auto fc2Gradient = fc2.backward(gradient, learningRate);
-            auto fc1Gradient = fc1.backward(fc2Gradient, learningRate);
-            conv1.backward(fc1Gradient, learningRate);
+            auto fc2_gradient = fc2.backward(gradient, learning_rate);
+            auto fc1_gradient = fc1.backward(fc2_gradient, learning_rate);
+            conv1.backward(fc1_gradient, learning_rate);
         }
 
-        return totalLoss / batch.size();
+        return total_loss / batch.size();
     }
 
     // 评估
@@ -384,9 +384,9 @@ public:
             auto output = forward(sample.features);
 
             // 找到概率最大的类别
-            int predictedLabel = std::max_element(output.begin(), output.end()) - output.begin();
+            int predicted_label = std::max_element(output.begin(), output.end()) - output.begin();
 
-            if (predictedLabel == sample.label)
+            if (predicted_label == sample.label)
             {
                 correct++;
             }
@@ -396,7 +396,7 @@ public:
     }
 
     // 保存模型
-    void saveModel(const std::string &filename)
+    void save_model(const std::string &filename)
     {
         std::ofstream file(filename, std::ios::binary);
         if (!file.is_open())
@@ -405,8 +405,8 @@ public:
         }
 
         // 这里简单实现，实际应该序列化所有层的参数
-        file.write(reinterpret_cast<const char *>(&inputDim), sizeof(inputDim));
-        file.write(reinterpret_cast<const char *>(&numLabels), sizeof(numLabels));
+        file.write(reinterpret_cast<const char *>(&input_dim), sizeof(input_dim));
+        file.write(reinterpret_cast<const char *>(&num_labels), sizeof(num_labels));
 
         // 各层参数也需要保存
         // ...
@@ -415,7 +415,7 @@ public:
     }
 
     // 加载模型
-    static SimpleCNN loadModel(const std::string &filename)
+    static SimpleCNN load_model(const std::string &filename)
     {
         std::ifstream file(filename, std::ios::binary);
         if (!file.is_open())
@@ -423,11 +423,11 @@ public:
             throw std::runtime_error("Failed to open file for loading model: " + filename);
         }
 
-        int inputDim, numLabels;
-        file.read(reinterpret_cast<char *>(&inputDim), sizeof(inputDim));
-        file.read(reinterpret_cast<char *>(&numLabels), sizeof(numLabels));
+        int input_dim, num_labels;
+        file.read(reinterpret_cast<char *>(&input_dim), sizeof(input_dim));
+        file.read(reinterpret_cast<char *>(&num_labels), sizeof(num_labels));
 
-        SimpleCNN model(inputDim, numLabels);
+        SimpleCNN model(input_dim, num_labels);
 
         // 加载各层参数
         // ...
