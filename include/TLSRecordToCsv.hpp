@@ -20,10 +20,10 @@ private:
     std::unordered_map<std::string, int> site_labels; // 所有网站名称及其对应的索引
     Parser &parser;                                   // 指向Parser对象的引用，用于获取TLS记录
 
-    std::string output_csv_path = "../data/tls_features.csv"; // 输出CSV文件路径
-    std::string label_map_path = "../data/site_labels.csv";   // 输出标签映射文件路径
-    int sample_count = 0;                                     // 样本数量计数器
-    int max_records_in_sample = -1;                           // 每个样本最多TLS记录数量，用于构建CNN输入向量
+    std::string output_csv_path;    // 输出CSV文件路径
+    std::string label_map_path;     // 输出标签映射文件路径
+    int sample_count = 0;           // 样本数量计数器
+    int max_records_in_sample = -1; // 每个样本最多TLS记录数量，用于构建CNN输入向量
 
 public:
     TLSRecordToCsv(Parser &parser_ref, const std::string &output_dir = "../output")
@@ -56,10 +56,13 @@ public:
         // 从Parser获取所有TLS记录
         auto &records_map = parser.get_tls_records_map();
 
+        // std::cout << "[DEBUG] 在generate_csv()中，1处site_labels大小为 " << site_labels.size() << std::endl;
+
         // 遍历每个站点
         for (const auto &site_pair : records_map)
         {
             std::string site_name = site_pair.first;
+            // std::cout << "[DEBUG] 在generate_csv()的遍历中，site_pair.first为 " << site_pair.first << std::endl;
             int site_label = site_labels[site_name];
 
             const auto &site_files = site_pair.second;
@@ -80,6 +83,7 @@ public:
                 }
             }
         }
+        // std::cout << "[DEBUG] 在generate_csv()中，2处site_labels大小为 " << site_labels.size() << std::endl;
 
         ofs.close();
 
@@ -101,13 +105,14 @@ private:
 
         // 从DomainManager加载所有域名，并分配标签
         std::unordered_set<std::string> unique_sites;
+        unique_sites.clear();
         std::vector<std::string> domains = DomainManager::instance()->get_domains();
         for (const auto &domain : domains)
         {
             std::string site_name = extract_site_name_from_url(domain);
             unique_sites.insert(site_name);
         }
-
+        std::cout << "[INFO] Found " << unique_sites.size() << " sites when initializing site labels. " << std::endl;
         int label = 0;
         for (const auto &site : unique_sites)
         {
@@ -135,10 +140,13 @@ private:
         ofs << "label,site_name" << std::endl;
 
         // 创建一个临时向量来排序标签
+        int count = 0;
         std::vector<std::pair<int, std::string>> sorted_labels;
+        // std::cout << "[DEBUG] 在generate_label_map()中，排序前的site_labels大小为" << site_labels.size() << std::endl;
         for (const auto &pair : site_labels)
         {
             sorted_labels.push_back({pair.second, pair.first});
+            // std::cout << "[DEBUG] sorted_labels push back次数：" << count++ << std::endl; // BUG出现了
         }
 
         // 按标签值排序

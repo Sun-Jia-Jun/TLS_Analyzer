@@ -75,25 +75,39 @@ private:
         pclose(fp);
         return found;
     }
-    static std::string extract_site_name_from_url(const std::string &url)
-    {
-        // www.baidu.com -> baidu
-        std::vector<std::string> parts;
-        std::string part;
-        std::istringstream iss(url);
-        std::string site_name;
+    // static std::string extract_site_name_from_url(const std::string &url)
+    // {
+    //     // www.baidu.com -> baidu
+    //     std::vector<std::string> parts;
+    //     std::string part;
+    //     std::istringstream iss(url);
+    //     std::string site_name;
+    //     while (std::getline(iss, part, '.'))
+    //     {
+    //         parts.emplace_back(part);
+    //     }
+    //     if (parts.size() >= 2)
+    //         return parts[parts.size() - 2];
+    //     else
+    //     {
+    //         std::cerr << "[WARN] Invalid URL format:" << url << std::endl;
+    //         return url;
+    //     }
+    // }
 
-        while (std::getline(iss, part, '.'))
+    static std::string extract_site_name_from_path(const std::string &file_path)
+    {
+        // path/to/data/baidu/timestamp<int>.pcap -> baidu
+        size_t last_slash = file_path.find_last_of('/');
+        size_t second_last_slash = file_path.find_last_of('/', last_slash - 1);
+
+        if (second_last_slash != std::string::npos && last_slash != std::string::npos)
         {
-            parts.emplace_back(part);
+            return file_path.substr(second_last_slash + 1, last_slash - second_last_slash - 1);
         }
-        if (parts.size() >= 2)
-            return parts[parts.size() - 2];
-        else
-        {
-            std::cerr << "[WARN] Invalid URL format:" << url << std::endl;
-            return url;
-        }
+
+        std::cerr << "[WARN] Cannot extract site name from path: " << file_path << std::endl;
+        return "unknown";
     }
 
     void parse_single_file(const std::string &file_path)
@@ -126,7 +140,7 @@ private:
                    // << " -E quote=d" // 使用引号隔开
                    << " -E occurrence=f";
 
-        std::cout << "[INFO] Running tshark command: " << tshark_cmd.str() << std::endl;
+        // std::cout << "[INFO] Running tshark command: " << tshark_cmd.str() << std::endl; //这个忒长了，
 
         FILE *fp = popen(tshark_cmd.str().c_str(), "r");
         if (!fp)
@@ -137,7 +151,8 @@ private:
 
         std::array<char, 4096> buf;
         size_t record_count = 0;
-        std::string site_name = extract_site_name_from_url(file_path);
+        // std::string site_name = extract_site_name_from_url(file_path); //! BUG
+        std::string site_name = extract_site_name_from_path(file_path);
 
         while (fgets(buf.data(), buf.size(), fp) != nullptr) // 逐行读取输出
         {
