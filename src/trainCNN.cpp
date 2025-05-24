@@ -2,14 +2,16 @@
 #include <chrono>
 #include <iomanip>
 #include <vector>
+#include <algorithm> // 添加这个头文件，用于 std::shuffle
+#include <random>    // 添加这个头文件，用于随机数生成
 
 #include "TLSDataProcessor.hpp"
 #include "SimpleCNN.hpp"
 
 // 超参数
-const float LEARNING_RATE = 0.01f;
-const int EPOCHS = 50;
-const int BATCH_SIZE = 32;
+const float LEARNING_RATE = 0.001f; // 降低学习率
+const int EPOCHS = 100;
+const int BATCH_SIZE = 16; // 减小批次大小
 
 const std::string MODEL_PATH = "../model/tls_model.bin";
 
@@ -38,6 +40,8 @@ int main()
 
         std::cout << "[INFO] Starting training..." << std::endl;
 
+        float learning_rate = LEARNING_RATE;
+
         // 训练
         auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -55,32 +59,42 @@ int main()
             // 批次训练
             for (size_t i = 0; i < shuffled_samples.size(); i += BATCH_SIZE)
             {
-                size_t batch_size = std::min(BATCH_SIZE, static_cast<int>(shuffled_samples.size() - i));
+                size_t batch_end = std::min(i + BATCH_SIZE, shuffled_samples.size());
                 std::vector<Sample> batch(shuffled_samples.begin() + i,
-                                          shuffled_samples.begin() + i + batch_size);
+                                          shuffled_samples.begin() + batch_end);
 
-                float batch_loss = model.train_batch(batch, LEARNING_RATE);
+                float batch_loss = model.train_batch(batch, learning_rate);
                 epoch_loss += batch_loss;
                 num_batches++;
             }
 
             epoch_loss /= num_batches;
 
-            // 评估
-            float train_acc = model.evaluate(train_samples);
-            float test_acc = model.evaluate(test_samples);
-
-            std::cout << "Epoch " << std::setw(3) << epoch + 1
-                      << ", Loss: " << std::fixed << std::setprecision(4) << epoch_loss
-                      << ", Train Acc: " << std::fixed << std::setprecision(2) << (train_acc * 100) << "%"
-                      << ", Test Acc: " << std::fixed << std::setprecision(2) << (test_acc * 100) << "%"
-                      << std::endl;
-
-            // 提前停止
-            if (train_acc > 0.99f && test_acc > 0.95f)
+            // 每10轮评估一次
+            if (epoch % 10 == 0 || epoch == EPOCHS - 1)
             {
-                std::cout << "[INFO] Early stopping at epoch " << epoch + 1 << std::endl;
-                break;
+                float train_acc = model.evaluate(train_samples);
+                float test_acc = model.evaluate(test_samples);
+
+                std::cout << "Epoch " << std::setw(3) << epoch + 1
+                          << ", Loss: " << std::fixed << std::setprecision(4) << epoch_loss
+                          << ", Train Acc: " << std::fixed << std::setprecision(2) << (train_acc * 100) << "%"
+                          << ", Test Acc: " << std::fixed << std::setprecision(2) << (test_acc * 100) << "%"
+                          << std::endl;
+
+                // 提前停止
+                if (train_acc > 0.95f && test_acc > 0.90f)
+                {
+                    std::cout << "[INFO] Early stopping at epoch " << epoch + 1 << std::endl;
+                    break;
+                }
+            }
+
+            // 学习率衰减
+            if (epoch > 0 && epoch % 30 == 0)
+            {
+                learning_rate *= 0.8f;
+                std::cout << "[INFO] Learning rate reduced to " << learning_rate << std::endl;
             }
         }
 

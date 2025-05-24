@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <random>
 #include <cmath>
+#include <numeric>
+#include <iostream>
 
 // 定义样本结构
 struct Sample
@@ -62,7 +64,7 @@ public:
     }
 
 private:
-    // 加载CSV数据
+    // 改进的数据加载，添加数据增强和标准化
     void load_data(const std::string &csv_path)
     {
         std::ifstream ifs(csv_path);
@@ -72,49 +74,141 @@ private:
         }
 
         std::string line;
-        // 跳过第一行，是列名
-        std::getline(ifs, line);
+        std::getline(ifs, line); // 跳过列名
 
-        // 逐行读取数据
+        std::unordered_map<int, int> label_counts;
+
         while (std::getline(ifs, line))
         {
             std::istringstream iss(line);
             std::string label_str, feature_str;
 
-            // 解析标签和特征字符串 0,xxxxx
             if (std::getline(iss, label_str, ',') && std::getline(iss, feature_str))
             {
                 Sample sample;
                 sample.label = std::stoi(label_str);
+                label_counts[sample.label]++;
                 num_labels = std::max(num_labels, sample.label + 1);
 
-                // 解析特征字符串 e.g. 387_0;1492_1;1000_1;198_0;298_1;233_0;1492_1;169_1
-                std::istringstream feature_stream(feature_str);
-                std::string pair;
-
-                while (std::getline(feature_stream, pair, ';'))
-                {
-                    size_t delim_pos = pair.find('_');
-                    if (delim_pos != std::string::npos)
-                    {
-                        int size = std::stoi(pair.substr(0, delim_pos));
-                        int direction = std::stoi(pair.substr(delim_pos + 1));
-
-                        // 归一化数据包大小 (通常在1-1500字节之间)
-                        float normalized_size = static_cast<float>(size) / 1500.0f;
-
-                        // 添加到特征向量
-                        sample.features.push_back(normalized_size);
-                        sample.features.push_back(static_cast<float>(direction));
-                    }
-                }
-
+                // 解析特征并添加统计特征
+                parse_features_with_stats(feature_str, sample);
                 samples.push_back(sample);
             }
         }
 
-        std::cout << "[INFO] Loaded " << samples.size() << " samples with "
-                  << num_labels << " unique labels." << std::endl;
+        // 打印数据分布
+        std::cout << "[INFO] Label distribution:" << std::endl;
+        for (const auto &pair : label_counts)
+        {
+            std::cout << "  Label " << pair.first << ": " << pair.second << " samples" << std::endl;
+        }
+
+        // 数据增强以平衡类别
+        balance_dataset();
+    }
+
+    // 解析特征并添加统计信息
+    void parse_features_with_stats(const std::string &feature_str, Sample &sample)
+    {
+        std::istringstream feature_stream(feature_str);
+        std::string pair;
+
+        std::vector<float> sizes, directions;
+
+        while (std::getline(feature_stream, pair, ';'))
+        {
+            size_t delim_pos = pair.find('_');
+            if (delim_pos != std::string::npos)
+            {
+                int size = std::stoi(pair.substr(0, delim_pos));
+                int direction = std::stoi(pair.substr(delim_pos + 1));
+
+                // 改进的归一化：使用对数变换
+                float normalized_size = std::log(static_cast<float>(size) + 1.0f) / std::log(1501.0f);
+
+                sample.features.push_back(normalized_size);
+                sample.features.push_back(static_cast<float>(direction));
+
+                sizes.push_back(normalized_size);
+                directions.push_back(static_cast<float>(direction));
+            }
+        }
+
+        // 添加统计特征
+        if (!sizes.empty())
+        {
+            // 包大小统计
+            float avg_size = std::accumulate(sizes.begin(), sizes.end(), 0.0f) / sizes.size();
+            float max_size = *std::max_element(sizes.begin(), sizes.end());
+            float min_size = *std::min_element(sizes.begin(), sizes.end());
+
+            // 方向统计
+            float outgoing_ratio = std::count(directions.begin(), directions.end(), 1.0f) / static_cast<float>(directions.size());
+
+            // 添加到特征末尾
+            sample.features.insert(sample.features.end(), {avg_size, max_size, min_size, outgoing_ratio});
+        }
+    }
+
+    // 平衡数据集
+    void balance_dataset()
+    {
+        std::unordered_map<int, std::vector<Sample>> label_samples;
+        for (const auto &sample : samples)
+        {
+            label_samples[sample.label].push_back(sample);
+        }
+
+        // 找到最大类别的样本数
+        size_t max_samples = 0;
+        for (const auto &pair : label_samples)
+        {
+            max_samples = std::max(max_samples, pair.second.size());
+        }
+
+        // 对小类别进行数据增强
+        std::vector<Sample> balanced_samples;
+        std::random_device rd;
+        std::mt19937 gen(rd());
+
+        for (const auto &pair : label_samples)
+        {
+            const auto &class_samples = pair.second;
+            balanced_samples.insert(balanced_samples.end(), class_samples.begin(), class_samples.end());
+
+            // 如果样本数不足，进行增强
+            if (class_samples.size() < max_samples)
+            {
+                size_t needed = max_samples - class_samples.size();
+                std::uniform_int_distribution<> dis(0, class_samples.size() - 1);
+
+                for (size_t i = 0; i < needed; ++i)
+                {
+                    // 随机选择一个样本进行轻微变换
+                    Sample augmented = class_samples[dis(gen)];
+                    add_noise(augmented, gen);
+                    balanced_samples.push_back(augmented);
+                }
+            }
+        }
+
+        samples = std::move(balanced_samples);
+        std::cout << "[INFO] Balanced dataset to " << samples.size() << " samples" << std::endl;
+    }
+
+    // 添加噪声进行数据增强
+    void add_noise(Sample &sample, std::mt19937 &gen)
+    {
+        std::normal_distribution<float> noise(0.0f, 0.02f); // 小幅噪声
+
+        for (size_t i = 0; i < sample.features.size(); ++i)
+        {
+            if (i % 2 == 0) // 只对大小特征添加噪声，不对方向添加
+            {
+                sample.features[i] += noise(gen);
+                sample.features[i] = std::max(0.0f, std::min(1.0f, sample.features[i])); // 限制范围
+            }
+        }
     }
 
     // 查找最长特征序列长度并填充

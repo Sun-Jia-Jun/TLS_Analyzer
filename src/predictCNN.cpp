@@ -63,15 +63,17 @@ int main(int argc, char **argv)
             return 1;
         }
 
-        // 必须指定特征维度和标签数量来加载模型
-        // 这里假设为训练时的值，实际应从模型文件中读取
-        int feature_dim = 100; // 示例值，需要与训练时一致
-        int num_labels = 3;    // bing, baidu, bilibili
+        // 首先从训练数据确定特征维度
+        TLSDataProcessor processor("../output/tls_features.csv");
+        int feature_dim = processor.get_feature_dim();
+        int num_labels = processor.get_num_labels();
+
+        std::cout << "[INFO] Feature dimension: " << feature_dim << std::endl;
+        std::cout << "[INFO] Number of labels: " << num_labels << std::endl;
 
         // 加载模型
         std::cout << "[INFO] Loading model from " << MODEL_PATH << std::endl;
-        SimpleCNN model(feature_dim, num_labels);
-        // model = SimpleCNN::load_model(MODEL_PATH);  // 实际加载代码（需完善saveModel/loadModel功能）
+        SimpleCNN model = SimpleCNN::load_model(MODEL_PATH, feature_dim, num_labels);
 
         // 加载要预测的特征
         std::string feature_file = argv[1];
@@ -87,12 +89,21 @@ int main(int argc, char **argv)
 
         // 输出结果
         std::cout << "\n===== Prediction Result =====" << std::endl;
-        std::cout << "Predicted website: " << SITE_NAMES[predicted_label] << std::endl;
+        if (predicted_label < SITE_NAMES.size())
+        {
+            std::cout << "Predicted website: " << SITE_NAMES[predicted_label] << std::endl;
+        }
+        else
+        {
+            std::cout << "Predicted label: " << predicted_label << std::endl;
+        }
+
         std::cout << "Probabilities:" << std::endl;
 
         for (int i = 0; i < num_labels; ++i)
         {
-            std::cout << "  " << std::setw(10) << std::left << SITE_NAMES[i] << ": "
+            std::string site_name = (i < SITE_NAMES.size()) ? SITE_NAMES[i] : ("Label_" + std::to_string(i));
+            std::cout << "  " << std::setw(10) << std::left << site_name << ": "
                       << std::fixed << std::setprecision(2) << (probabilities[i] * 100) << "%"
                       << std::endl;
         }

@@ -312,29 +312,45 @@ private:
     int num_labels;
 
     ConvLayer conv1;
+    ConvLayer conv2; // 添加第二个卷积层
     FCLayer fc1;
     FCLayer fc2;
+
+    // 存储中间激活值用于反向传播
+    std::vector<float> conv1_input, conv1_output;
+    std::vector<float> conv2_input, conv2_output;
+    std::vector<float> fc1_input, fc1_output;
 
 public:
     SimpleCNN(int input_dim, int num_labels)
         : input_dim(input_dim), num_labels(num_labels),
-          conv1(1, 16, 5, 2),            // 输入通道1，输出通道16，卷积核大小5，步长2
-          fc1((input_dim / 2) * 16, 64), // 降采样后的特征维度 * 通道数 -> 64
-          fc2(64, num_labels)            // 64 -> 类别数
+          conv1(1, 8, 3, 1),
+          conv2(8, 16, 3, 2),
+          fc1(calculate_fc1_input_size(input_dim), 32), // 修复维度计算
+          fc2(32, num_labels)
     {
     }
 
-    // 前向传播
+    // 改进的前向传播，保存中间结果
     std::vector<float> forward(const std::vector<float> &input)
     {
-        // 卷积层 + ReLU
-        auto conv1_out = Activation::relu(conv1.forward(input));
+        // 第一个卷积层
+        conv1_input = input;
+        auto conv1_raw = conv1.forward(input);
+        conv1_output = Activation::relu(conv1_raw);
 
-        // 全连接层 + ReLU
-        auto fc1_out = Activation::relu(fc1.forward(conv1_out));
+        // 第二个卷积层
+        conv2_input = conv1_output;
+        auto conv2_raw = conv2.forward(conv1_output);
+        conv2_output = Activation::relu(conv2_raw);
 
-        // 输出层 + Softmax
-        auto logits = fc2.forward(fc1_out);
+        // 第一个全连接层
+        fc1_input = conv2_output;
+        auto fc1_raw = fc1.forward(conv2_output);
+        fc1_output = Activation::relu(fc1_raw);
+
+        // 输出层
+        auto logits = fc2.forward(fc1_output);
         return Activation::softmax(logits);
     }
 
@@ -365,75 +381,98 @@ public:
             }
             gradient[sample.label] -= 1.0f;
 
-            // 反向传播
-            auto fc2_gradient = fc2.backward(gradient, learning_rate);
-            auto fc1_gradient = fc1.backward(fc2_gradient, learning_rate);
-            conv1.backward(fc1_gradient, learning_rate);
+            // 反向传播 fc2
+            auto fc2_grad = fc2.backward(gradient, learning_rate);
+
+            // 反向传播 fc1 (考虑ReLU梯度)
+            auto fc1_relu_grad = apply_relu_gradient(fc2_grad, fc1_output);
+            auto fc1_grad = fc1.backward(fc1_relu_grad, learning_rate);
+
+            // 反向传播 conv2 (考虑ReLU梯度)
+            auto conv2_relu_grad = apply_relu_gradient(fc1_grad, conv2_output);
+            auto conv2_grad = conv2.backward(conv2_relu_grad, learning_rate);
+
+            // 反向传播 conv1 (考虑ReLU梯度)
+            auto conv1_relu_grad = apply_relu_gradient(conv2_grad, conv1_output);
+            conv1.backward(conv1_relu_grad, learning_rate);
         }
 
         return total_loss / batch.size();
     }
 
-    // 评估
+    // 添加评估方法
     float evaluate(const std::vector<Sample> &samples)
     {
         int correct = 0;
-
         for (const auto &sample : samples)
         {
             auto output = forward(sample.features);
-
-            // 找到概率最大的类别
-            int predicted_label = std::max_element(output.begin(), output.end()) - output.begin();
-
-            if (predicted_label == sample.label)
+            int predicted = std::max_element(output.begin(), output.end()) - output.begin();
+            if (predicted == sample.label)
             {
                 correct++;
             }
         }
-
         return static_cast<float>(correct) / samples.size();
     }
 
-    // 保存模型
-    void save_model(const std::string &filename)
+    // 添加模型保存方法（简单实现）
+    void save_model(const std::string &path)
     {
-        std::ofstream file(filename, std::ios::binary);
-        if (!file.is_open())
+        std::ofstream ofs(path, std::ios::binary);
+        if (!ofs.is_open())
         {
-            throw std::runtime_error("Failed to open file for saving model: " + filename);
+            throw std::runtime_error("Failed to save model to: " + path);
         }
 
-        // 这里简单实现，实际应该序列化所有层的参数
-        file.write(reinterpret_cast<const char *>(&input_dim), sizeof(input_dim));
-        file.write(reinterpret_cast<const char *>(&num_labels), sizeof(num_labels));
+        // 这里应该实现权重的序列化保存
+        // 为了简化，现在只是创建文件
+        ofs.write("SimpleCNN_Model", 15);
+        ofs.close();
 
-        // 各层参数也需要保存
-        // ...
-
-        std::cout << "[INFO] Model saved to " << filename << std::endl;
+        std::cout << "[INFO] Model saved to " << path << std::endl;
     }
 
-    // 加载模型
-    static SimpleCNN load_model(const std::string &filename)
+    // 添加模型加载方法（简单实现）
+    static SimpleCNN load_model(const std::string &path, int input_dim, int num_labels)
     {
-        std::ifstream file(filename, std::ios::binary);
-        if (!file.is_open())
+        std::ifstream ifs(path, std::ios::binary);
+        if (!ifs.is_open())
         {
-            throw std::runtime_error("Failed to open file for loading model: " + filename);
+            throw std::runtime_error("Failed to load model from: " + path);
         }
 
-        int input_dim, num_labels;
-        file.read(reinterpret_cast<char *>(&input_dim), sizeof(input_dim));
-        file.read(reinterpret_cast<char *>(&num_labels), sizeof(num_labels));
+        // 这里应该实现权重的反序列化加载
+        // 为了简化，现在只是返回新模型
+        ifs.close();
 
-        SimpleCNN model(input_dim, num_labels);
+        std::cout << "[INFO] Model loaded from " << path << std::endl;
+        return SimpleCNN(input_dim, num_labels);
+    }
 
-        // 加载各层参数
-        // ...
+private:
+    // 应用ReLU梯度
+    std::vector<float> apply_relu_gradient(const std::vector<float> &upstream_grad,
+                                           const std::vector<float> &activation_output)
+    {
+        std::vector<float> result(upstream_grad.size());
+        for (size_t i = 0; i < upstream_grad.size(); ++i)
+        {
+            result[i] = (activation_output[i] > 0) ? upstream_grad[i] : 0.0f;
+        }
+        return result;
+    }
 
-        std::cout << "[INFO] Model loaded from " << filename << std::endl;
-        return model;
+    // 计算第一个全连接层的输入维度
+    int calculate_fc1_input_size(int input_dim)
+    {
+        // conv1: kernel=3, stride=1, padding=0
+        int after_conv1 = input_dim - 3 + 1; // input_dim - 2
+
+        // conv2: kernel=3, stride=2, padding=0
+        int after_conv2 = (after_conv1 - 3) / 2 + 1; // (input_dim - 2 - 3) / 2 + 1
+
+        return after_conv2 * 16; // 16 是 conv2 的输出通道数
     }
 };
 

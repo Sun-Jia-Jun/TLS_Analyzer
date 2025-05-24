@@ -96,7 +96,7 @@ public:
             //* 使用popen可能没有正确退出  -->  艹改完回头又瞅了一眼，发现我忘记pclose(fp)了，(悲)
             // std::string cmd = tcpdump_cmd.str();
             // popen(cmd.c_str(), "r");
-            
+
             // 使用 execl 而不是 popen 来执行 tcpdump
             std::string cmd = tcpdump_cmd.str();
             std::vector<std::string> args;
@@ -234,28 +234,43 @@ private:
         }
     }
 
-    static bool ensure_dir_exists(const std::string &dir) // 存在:return true; 不存在:mkdir -> return true
+    static bool ensure_dir_exists(const std::string &dir)
     {
         struct stat dir_st;
+
+        // 检查目录是否已存在
         if (stat(dir.c_str(), &dir_st) == 0)
         {
             if (S_ISDIR(dir_st.st_mode))
-                return true;
-            else // 存在重名非目录文件->无法mkdir
             {
-                std::cerr << "[ERROR] Path exists but is not a directory:" << dir << std::endl;
+                return true; // 目录已存在
+            }
+            else
+            {
+                std::cerr << "[ERROR] Path exists but is not a directory: " << dir << std::endl;
                 return false;
             }
         }
 
+        // 目录不存在，尝试创建
         if (mkdir(dir.c_str(), 0755) != 0)
         {
-            std::cerr << "[ERROR] Failed to create directory: " << dir << std::endl;
+            std::cerr << "[ERROR] Failed to create directory: " << dir
+                      << " - " << strerror(errno) << std::endl;
             return false;
         }
 
-        std::cout << "[INFO] Directory " << dir << " created." << std::endl;
-        return true;
+        // 验证创建成功
+        if (stat(dir.c_str(), &dir_st) == 0 && S_ISDIR(dir_st.st_mode))
+        {
+            std::cout << "[INFO] Directory " << dir << " created successfully." << std::endl;
+            return true;
+        }
+        else
+        {
+            std::cerr << "[ERROR] Directory creation verification failed: " << dir << std::endl;
+            return false;
+        }
     }
 };
 
