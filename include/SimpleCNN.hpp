@@ -26,18 +26,7 @@ public:
         return result;
     }
 
-    // ReLU导数
-    static std::vector<float> relu_derivative(const std::vector<float> &x)
-    {
-        std::vector<float> result(x.size());
-        for (size_t i = 0; i < x.size(); ++i)
-        {
-            result[i] = (x[i] > 0) ? 1.0f : 0.0f;
-        }
-        return result;
-    }
-
-    // Softmax激活
+    // Softmax激活 - 增强数值稳定性
     static std::vector<float> softmax(const std::vector<float> &x)
     {
         std::vector<float> result(x.size());
@@ -48,11 +37,12 @@ public:
         float sum = 0.0f;
         for (size_t i = 0; i < x.size(); ++i)
         {
-            result[i] = std::exp(x[i] - max_val);
+            result[i] = std::exp(std::min(x[i] - max_val, 80.0f)); // 限制指数值
             sum += result[i];
         }
 
-        // 归一化
+        // 归一化，防止除零
+        sum = std::max(sum, 1e-7f);
         for (size_t i = 0; i < x.size(); ++i)
         {
             result[i] /= sum;
@@ -244,12 +234,12 @@ private:
 public:
     FCLayer(int input_size, int output_size) : input_size(input_size), output_size(output_size)
     {
-        // Xavier初始化
-        float scale = std::sqrt(6.0f / (input_size + output_size));
+        // He初始化，更适合ReLU
+        float scale = std::sqrt(2.0f / input_size);
 
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dist(-scale, scale);
+        std::normal_distribution<float> dist(0.0f, scale);
 
         // 初始化权重
         weights.resize(output_size, std::vector<float>(input_size));
@@ -312,41 +302,47 @@ private:
     int num_labels;
 
     ConvLayer conv1;
-    ConvLayer conv2; // 添加第二个卷积层
-    FCLayer fc1;
+    FCLayer fc1; // 简化网络结构，去掉第二个卷积层
     FCLayer fc2;
 
     // 存储中间激活值用于反向传播
     std::vector<float> conv1_input, conv1_output;
-    std::vector<float> conv2_input, conv2_output;
     std::vector<float> fc1_input, fc1_output;
 
 public:
     SimpleCNN(int input_dim, int num_labels)
         : input_dim(input_dim), num_labels(num_labels),
-          conv1(1, 8, 3, 1),
-          conv2(8, 16, 3, 2),
-          fc1(calculate_fc1_input_size(input_dim), 32), // 修复维度计算
-          fc2(32, num_labels)
+          conv1(1, 4, 5, 2),                // 减少通道数，增大步长
+          fc1((input_dim - 4) / 2 * 4, 16), // 简化维度计算
+          fc2(16, num_labels)
     {
+        std::cout << "[INFO] CNN architecture:" << std::endl;
+        std::cout << "  Input dim: " << input_dim << std::endl;
+        std::cout << "  Conv1: 1->4 channels, kernel=5, stride=2" << std::endl;
+        std::cout << "  FC1: " << (input_dim - 4) / 2 * 4 << " -> 16" << std::endl;
+        std::cout << "  FC2: 16 -> " << num_labels << std::endl;
     }
 
-    // 改进的前向传播，保存中间结果
+    // 简化的前向传播
     std::vector<float> forward(const std::vector<float> &input)
     {
-        // 第一个卷积层
+        // 检查输入有效性
+        for (float val : input)
+        {
+            if (std::isnan(val) || std::isinf(val))
+            {
+                throw std::runtime_error("Invalid input detected in forward pass");
+            }
+        }
+
+        // 卷积层
         conv1_input = input;
         auto conv1_raw = conv1.forward(input);
         conv1_output = Activation::relu(conv1_raw);
 
-        // 第二个卷积层
-        conv2_input = conv1_output;
-        auto conv2_raw = conv2.forward(conv1_output);
-        conv2_output = Activation::relu(conv2_raw);
-
         // 第一个全连接层
-        fc1_input = conv2_output;
-        auto fc1_raw = fc1.forward(conv2_output);
+        fc1_input = conv1_output;
+        auto fc1_raw = fc1.forward(conv1_output);
         fc1_output = Activation::relu(fc1_raw);
 
         // 输出层
@@ -354,50 +350,73 @@ public:
         return Activation::softmax(logits);
     }
 
-    // 计算交叉熵损失
+    // 改进的损失计算
     float compute_loss(const std::vector<float> &output, int label)
     {
-        return -std::log(std::max(output[label], 1e-7f));
+        float prob = std::max(output[label], 1e-7f); // 避免log(0)
+        float loss = -std::log(prob);
+
+        // 限制损失值
+        return std::min(loss, 10.0f);
     }
 
-    // 训练一个批次
+    // 改进的训练方法，添加梯度裁剪
     float train_batch(const std::vector<Sample> &batch, float learning_rate)
     {
         float total_loss = 0.0f;
+        int valid_samples = 0;
 
         for (const auto &sample : batch)
         {
-            // 前向传播
-            auto output = forward(sample.features);
-
-            // 计算损失
-            total_loss += compute_loss(output, sample.label);
-
-            // 计算输出层梯度
-            std::vector<float> gradient(num_labels, 0.0f);
-            for (int i = 0; i < num_labels; ++i)
+            try
             {
-                gradient[i] = output[i];
+                // 前向传播
+                auto output = forward(sample.features);
+
+                // 计算损失
+                float loss = compute_loss(output, sample.label);
+
+                if (std::isnan(loss) || std::isinf(loss))
+                {
+                    std::cout << "[WARNING] Invalid loss detected, skipping sample" << std::endl;
+                    continue;
+                }
+
+                total_loss += loss;
+                valid_samples++;
+
+                // 计算输出层梯度
+                std::vector<float> gradient(num_labels, 0.0f);
+                for (int i = 0; i < num_labels; ++i)
+                {
+                    gradient[i] = output[i];
+                }
+                gradient[sample.label] -= 1.0f;
+
+                // 梯度裁剪
+                clip_gradients(gradient, 1.0f);
+
+                // 反向传播 fc2
+                auto fc2_grad = fc2.backward(gradient, learning_rate);
+                clip_gradients(fc2_grad, 1.0f);
+
+                // 反向传播 fc1 (考虑ReLU梯度)
+                auto fc1_relu_grad = apply_relu_gradient(fc2_grad, fc1_output);
+                auto fc1_grad = fc1.backward(fc1_relu_grad, learning_rate);
+                clip_gradients(fc1_grad, 1.0f);
+
+                // 反向传播 conv1 (考虑ReLU梯度)
+                auto conv1_relu_grad = apply_relu_gradient(fc1_grad, conv1_output);
+                conv1.backward(conv1_relu_grad, learning_rate);
             }
-            gradient[sample.label] -= 1.0f;
-
-            // 反向传播 fc2
-            auto fc2_grad = fc2.backward(gradient, learning_rate);
-
-            // 反向传播 fc1 (考虑ReLU梯度)
-            auto fc1_relu_grad = apply_relu_gradient(fc2_grad, fc1_output);
-            auto fc1_grad = fc1.backward(fc1_relu_grad, learning_rate);
-
-            // 反向传播 conv2 (考虑ReLU梯度)
-            auto conv2_relu_grad = apply_relu_gradient(fc1_grad, conv2_output);
-            auto conv2_grad = conv2.backward(conv2_relu_grad, learning_rate);
-
-            // 反向传播 conv1 (考虑ReLU梯度)
-            auto conv1_relu_grad = apply_relu_gradient(conv2_grad, conv1_output);
-            conv1.backward(conv1_relu_grad, learning_rate);
+            catch (const std::exception &e)
+            {
+                std::cout << "[WARNING] Error in training sample: " << e.what() << std::endl;
+                continue;
+            }
         }
 
-        return total_loss / batch.size();
+        return valid_samples > 0 ? total_loss / valid_samples : 0.0f;
     }
 
     // 添加评估方法
@@ -451,6 +470,26 @@ public:
     }
 
 private:
+    // 梯度裁剪
+    void clip_gradients(std::vector<float> &gradients, float max_norm)
+    {
+        float norm = 0.0f;
+        for (float grad : gradients)
+        {
+            norm += grad * grad;
+        }
+        norm = std::sqrt(norm);
+
+        if (norm > max_norm)
+        {
+            float scale = max_norm / norm;
+            for (float &grad : gradients)
+            {
+                grad *= scale;
+            }
+        }
+    }
+
     // 应用ReLU梯度
     std::vector<float> apply_relu_gradient(const std::vector<float> &upstream_grad,
                                            const std::vector<float> &activation_output)

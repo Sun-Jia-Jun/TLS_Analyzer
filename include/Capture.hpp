@@ -253,7 +253,7 @@ private:
         }
 
         // 目录不存在，尝试创建
-        if (mkdir(dir.c_str(), 0755) != 0)
+        if (mkdir(dir.c_str(), 0755) == -1) // 返回-1说明创建失败
         {
             std::cerr << "[ERROR] Failed to create directory: " << dir
                       << " - " << strerror(errno) << std::endl;

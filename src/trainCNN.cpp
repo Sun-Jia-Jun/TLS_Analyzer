@@ -8,10 +8,10 @@
 #include "TLSDataProcessor.hpp"
 #include "SimpleCNN.hpp"
 
-// 超参数
-const float LEARNING_RATE = 0.001f; // 降低学习率
+// 超参数调整
+const float LEARNING_RATE = 0.01f; // 提高初始学习率
 const int EPOCHS = 100;
-const int BATCH_SIZE = 16; // 减小批次大小
+const int BATCH_SIZE = 8; // 进一步减小批次大小
 
 const std::string MODEL_PATH = "../model/tls_model.bin";
 
@@ -41,6 +41,9 @@ int main()
         std::cout << "[INFO] Starting training..." << std::endl;
 
         float learning_rate = LEARNING_RATE;
+        float best_test_acc = 0.0f;
+        int patience = 0;
+        const int max_patience = 10;
 
         // 训练
         auto start_time = std::chrono::high_resolution_clock::now();
@@ -64,14 +67,27 @@ int main()
                                           shuffled_samples.begin() + batch_end);
 
                 float batch_loss = model.train_batch(batch, learning_rate);
+
+                // 检查NaN
+                if (std::isnan(batch_loss) || std::isinf(batch_loss))
+                {
+                    std::cout << "[WARNING] NaN/Inf detected in batch loss at epoch " << epoch + 1 << std::endl;
+                    std::cout << "[INFO] Resetting learning rate and continuing..." << std::endl;
+                    learning_rate = LEARNING_RATE * 0.1f; // 大幅降低学习率
+                    continue;
+                }
+
                 epoch_loss += batch_loss;
                 num_batches++;
             }
 
-            epoch_loss /= num_batches;
+            if (num_batches > 0)
+            {
+                epoch_loss /= num_batches;
+            }
 
-            // 每10轮评估一次
-            if (epoch % 10 == 0 || epoch == EPOCHS - 1)
+            // 每5轮评估一次
+            if (epoch % 5 == 0 || epoch == EPOCHS - 1)
             {
                 float train_acc = model.evaluate(train_samples);
                 float test_acc = model.evaluate(test_samples);
@@ -80,7 +96,24 @@ int main()
                           << ", Loss: " << std::fixed << std::setprecision(4) << epoch_loss
                           << ", Train Acc: " << std::fixed << std::setprecision(2) << (train_acc * 100) << "%"
                           << ", Test Acc: " << std::fixed << std::setprecision(2) << (test_acc * 100) << "%"
-                          << std::endl;
+                          << ", LR: " << std::scientific << learning_rate << std::endl;
+
+                // 早停机制
+                if (test_acc > best_test_acc)
+                {
+                    best_test_acc = test_acc;
+                    patience = 0;
+                }
+                else
+                {
+                    patience++;
+                }
+
+                if (patience >= max_patience)
+                {
+                    std::cout << "[INFO] Early stopping due to no improvement" << std::endl;
+                    break;
+                }
 
                 // 提前停止
                 if (train_acc > 0.95f && test_acc > 0.90f)
@@ -90,11 +123,12 @@ int main()
                 }
             }
 
-            // 学习率衰减
-            if (epoch > 0 && epoch % 30 == 0)
+            // 改进的学习率衰减
+            if (epoch > 0 && epoch % 20 == 0)
             {
-                learning_rate *= 0.8f;
-                std::cout << "[INFO] Learning rate reduced to " << learning_rate << std::endl;
+                learning_rate *= 0.9f;                          // 减缓衰减速度
+                learning_rate = std::max(learning_rate, 1e-6f); // 设置最小学习率
+                std::cout << "[INFO] Learning rate reduced to " << std::scientific << learning_rate << std::endl;
             }
         }
 
