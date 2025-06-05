@@ -1,3 +1,6 @@
+/*
+TLS数据处理器，用于加载、解析、预处理从csv读取的TLS数据，并将这些数据划分为训练集和测试集，以便后续的训练和评估。
+*/
 #ifndef _TLS_DATA_PROCESSOR_HPP_
 #define _TLS_DATA_PROCESSOR_HPP_
 
@@ -12,59 +15,47 @@
 #include <numeric>
 #include <iostream>
 
-// 定义样本结构
+// 一个Sample为一次完整的TLS通信会话的特征化表示。
 struct Sample
 {
-    int label;                   // 网站标签 (e.g. 0:bing, 1:baidu, 2:bilibili ...)
-    std::vector<float> features; // 特征向量 包含数据包大小和方向)
+    int label;                   // 网站标签
+    std::vector<float> features; // 特征向量
 };
 
 class TLSDataProcessor
 {
 private:
-    std::vector<Sample> samples;       // 所有样本
-    std::vector<Sample> train_samples; // 训练集
-    std::vector<Sample> test_samples;  // 测试集
+    std::vector<Sample> samples;
+    std::vector<Sample> train_samples;
+    std::vector<Sample> test_samples;
 
-    int num_labels = 0;         // 标签数量
-    int max_feature_length = 0; // 最长特征序列的长度
-    int feature_dim = 2;        // 特征维度(数据包大小、方向)
-    float test_ratio = 0.2;     // 测试集占比
+    int num_labels = 0;
+    int max_sequence_length = 0;
+    float test_ratio = 0.2f;
+
+    // 统计特征维度：每个包(大小+方向) + 全局统计特征
+    static const int PACKET_FEATURES = 2; // 大小 + 方向
+    static const int STATS_FEATURES = 6;  // 平均大小、最大、最小、标准差、出包比例、总包数
 
 public:
     TLSDataProcessor(const std::string &csv_path)
     {
         load_data(csv_path);
-        find_max_feature_length();
+        normalize_features();
         shuffle_and_split();
     }
 
-    // 获取特征维度(经过填充后)
+    // 获取特征维度
     int get_feature_dim() const
     {
-        return max_feature_length * feature_dim;
+        return max_sequence_length * PACKET_FEATURES + STATS_FEATURES;
     }
 
-    // 获取标签数量
-    int get_num_labels() const
-    {
-        return num_labels;
-    }
-
-    // 获取训练集
-    const std::vector<Sample> &get_train_samples() const
-    {
-        return train_samples;
-    }
-
-    // 获取测试集
-    const std::vector<Sample> &get_test_samples() const
-    {
-        return test_samples;
-    }
+    int get_num_labels() const { return num_labels; }
+    const std::vector<Sample> &get_train_samples() const { return train_samples; }
+    const std::vector<Sample> &get_test_samples() const { return test_samples; }
 
 private:
-    // 改进的数据加载，添加数据增强和标准化
     void load_data(const std::string &csv_path)
     {
         std::ifstream ifs(csv_path);
@@ -74,185 +65,174 @@ private:
         }
 
         std::string line;
-        std::getline(ifs, line); // 跳过列名
+        std::getline(ifs, line); // 跳过header
 
-        std::unordered_map<int, int> label_counts;
+        std::unordered_map<int, int> label_counts; // label_counts记录每个网站的样本数
 
         while (std::getline(ifs, line))
         {
+            if (line.empty())
+                continue;
+
             std::istringstream iss(line);
-            std::string label_str, feature_str;
+            std::string label_str, feature_str; // feature_str为本次TLS通信的所有TLS数据包的特征字符串
 
             if (std::getline(iss, label_str, ',') && std::getline(iss, feature_str))
             {
                 Sample sample;
                 sample.label = std::stoi(label_str);
                 label_counts[sample.label]++;
-                num_labels = std::max(num_labels, sample.label + 1);
+                num_labels = std::max(num_labels, sample.label + 1); //* 确保num_labels为当前最大的标签数，+1是因为sample.label从0开始
 
-                // 解析特征并添加统计特征
-                parse_features_with_stats(feature_str, sample);
+                parse_packet_features(feature_str, sample);
                 samples.push_back(sample);
             }
         }
 
         // 打印数据分布
-        std::cout << "[INFO] Label distribution:" << std::endl;
+        std::cout << "[INFO] Data distribution:" << std::endl;
         for (const auto &pair : label_counts)
         {
             std::cout << "  Label " << pair.first << ": " << pair.second << " samples" << std::endl;
         }
 
-        // 数据增强以平衡类别
-        balance_dataset();
+        std::cout << "[INFO] Loaded " << samples.size() << " samples with "
+                  << num_labels << " classes" << std::endl;
     }
 
-    // 解析特征并添加统计信息
-    void parse_features_with_stats(const std::string &feature_str, Sample &sample)
+    /*
+    @brief 解析某一个样本的特征字符串，提取其中的参数(大小和方向)，归一化并添加到sample。同时更新最大序列长度。
+    @param feature_str 特征字符串
+    @param sample feature_str对应的sample
+    */
+    void parse_packet_features(const std::string &feature_str, Sample &sample)
     {
+        std::vector<float> packet_sizes; // 一个样本中每个包大小的向量
+        std::vector<float> directions;   // 一个样本中每个包方向的向量
+
         std::istringstream feature_stream(feature_str);
-        std::string pair;
+        std::string packet_info;
 
-        std::vector<float> sizes, directions;
-
-        while (std::getline(feature_stream, pair, ';'))
+        // 解析每个包的信息：大小_方向
+        while (std::getline(feature_stream, packet_info, ';'))
         {
-            size_t delim_pos = pair.find('_');
+            size_t delim_pos = packet_info.find('_');
             if (delim_pos != std::string::npos)
             {
-                int size = std::stoi(pair.substr(0, delim_pos));
-                int direction = std::stoi(pair.substr(delim_pos + 1));
-
-                // 改进的归一化：使用对数变换
-                float normalized_size = std::log(static_cast<float>(size) + 1.0f) / std::log(1501.0f);
-
-                sample.features.push_back(normalized_size);
-                sample.features.push_back(static_cast<float>(direction));
-
-                sizes.push_back(normalized_size);
-                directions.push_back(static_cast<float>(direction));
-            }
-        }
-
-        // 添加统计特征
-        if (!sizes.empty())
-        {
-            // 包大小统计
-            float avg_size = std::accumulate(sizes.begin(), sizes.end(), 0.0f) / sizes.size();
-            float max_size = *std::max_element(sizes.begin(), sizes.end());
-            float min_size = *std::min_element(sizes.begin(), sizes.end());
-
-            // 方向统计
-            float outgoing_ratio = std::count(directions.begin(), directions.end(), 1.0f) / static_cast<float>(directions.size());
-
-            // 添加到特征末尾
-            sample.features.insert(sample.features.end(), {avg_size, max_size, min_size, outgoing_ratio});
-        }
-    }
-
-    // 平衡数据集
-    void balance_dataset()
-    {
-        std::unordered_map<int, std::vector<Sample>> label_samples;
-        for (const auto &sample : samples)
-        {
-            label_samples[sample.label].push_back(sample);
-        }
-
-        // 找到最大类别的样本数
-        size_t max_samples = 0;
-        for (const auto &pair : label_samples)
-        {
-            max_samples = std::max(max_samples, pair.second.size());
-        }
-
-        // 对小类别进行数据增强
-        std::vector<Sample> balanced_samples;
-        std::random_device rd;
-        std::mt19937 gen(rd());
-
-        for (const auto &pair : label_samples)
-        {
-            const auto &class_samples = pair.second;
-            balanced_samples.insert(balanced_samples.end(), class_samples.begin(), class_samples.end());
-
-            // 如果样本数不足，进行增强
-            if (class_samples.size() < max_samples)
-            {
-                size_t needed = max_samples - class_samples.size();
-                std::uniform_int_distribution<> dis(0, class_samples.size() - 1);
-
-                for (size_t i = 0; i < needed; ++i)
+                try
                 {
-                    // 随机选择一个样本进行轻微变换
-                    Sample augmented = class_samples[dis(gen)];
-                    add_noise(augmented, gen);
-                    balanced_samples.push_back(augmented);
+                    int size = std::stoi(packet_info.substr(0, delim_pos));
+                    int direction = std::stoi(packet_info.substr(delim_pos + 1));
+
+                    // 对数归一化包大小，保持在[0,1]范围
+                    float normalized_size = std::log(static_cast<float>(size) + 1.0f) / std::log(1501.0f);
+                    normalized_size = std::min(1.0f, std::max(0.0f, normalized_size)); //* 正溢为1，负溢为0
+
+                    packet_sizes.push_back(normalized_size);
+                    directions.push_back(static_cast<float>(direction));
+
+                    // 添加包特征到序列中
+                    sample.features.push_back(normalized_size);
+                    sample.features.push_back(static_cast<float>(direction));
+                }
+                catch (const std::exception &e)
+                {
+                    // 跳过无效的包信息
+                    continue;
                 }
             }
         }
 
-        samples = std::move(balanced_samples);
-        std::cout << "[INFO] Balanced dataset to " << samples.size() << " samples" << std::endl;
+        // 更新最大序列长度
+        int current_length = sample.features.size() / PACKET_FEATURES;
+        max_sequence_length = std::max(max_sequence_length, current_length);
+
+        // 计算并添加统计特征
+        add_statistical_features(sample, packet_sizes, directions);
     }
 
-    // 添加噪声进行数据增强
-    void add_noise(Sample &sample, std::mt19937 &gen)
+    /*
+    @brief 计算统计特征，并添加到当前样本尾部
+    @param sample 当前样本
+    @param sizes 当前样本中每个包的大小的集合
+    @param directions 当前样本中每个包的方向的集合
+    */
+    void add_statistical_features(Sample &sample,
+                                  const std::vector<float> &sizes,
+                                  const std::vector<float> &directions)
     {
-        std::normal_distribution<float> noise(0.0f, 0.02f); // 小幅噪声
+        if (sizes.empty())
+            return;
 
-        for (size_t i = 0; i < sample.features.size(); ++i)
+        // 包大小统计
+        float avg_size = std::accumulate(sizes.begin(), sizes.end(), 0.0f) / sizes.size();
+        float max_size = *std::max_element(sizes.begin(), sizes.end());
+        float min_size = *std::min_element(sizes.begin(), sizes.end());
+
+        // 计算标准差
+        float variance = 0.0f;
+        for (float size : sizes)
         {
-            if (i % 2 == 0) // 只对大小特征添加噪声，不对方向添加
-            {
-                sample.features[i] += noise(gen);
-                sample.features[i] = std::max(0.0f, std::min(1.0f, sample.features[i])); // 限制范围
-            }
+            variance += (size - avg_size) * (size - avg_size);
         }
+        float std_dev = std::sqrt(variance / sizes.size());
+
+        // 方向统计
+        float outgoing_ratio = std::count(directions.begin(), directions.end(), 1.0f) /
+                               static_cast<float>(directions.size());
+
+        // 总包数（归一化）
+        float total_packets = std::log(static_cast<float>(sizes.size()) + 1.0f) / std::log(101.0f);
+
+        // 将统计特征暂存，稍后添加
+        sample.features.insert(sample.features.end(),
+                               {avg_size, max_size, min_size, std_dev, outgoing_ratio, total_packets});
     }
 
-    // 查找最长特征序列长度并填充
-    void find_max_feature_length()
+    void normalize_features()
     {
-        for (const auto &sample : samples)
-        {
-            max_feature_length = std::max(max_feature_length,
-                                          static_cast<int>(sample.features.size() / feature_dim));
-        }
+        std::cout << "[INFO] Normalizing features. Max sequence length: " << max_sequence_length << std::endl;
 
-        std::cout << "[INFO] Max feature length: " << max_feature_length
-                  << " pairs (= " << max_feature_length * feature_dim
-                  << " float values)" << std::endl;
-
-        // 对所有样本进行填充
         for (auto &sample : samples)
         {
-            int current_length = sample.features.size() / feature_dim;
-            if (current_length < max_feature_length)
+            // 分离序列特征和统计特征
+            std::vector<float> stats_features;
+            if (sample.features.size() >= STATS_FEATURES)
             {
-                // 填充0
-                sample.features.resize(max_feature_length * feature_dim, 0.0f);
+                stats_features.assign(sample.features.end() - STATS_FEATURES, sample.features.end());
+                sample.features.erase(sample.features.end() - STATS_FEATURES, sample.features.end());
             }
+
+            // 填充序列特征到固定长度
+            int current_length = sample.features.size() / PACKET_FEATURES;
+            if (current_length < max_sequence_length)
+            {
+                int padding_needed = (max_sequence_length - current_length) * PACKET_FEATURES;
+                sample.features.resize(sample.features.size() + padding_needed, 0.0f);
+            }
+
+            // 重新添加统计特征
+            sample.features.insert(sample.features.end(), stats_features.begin(), stats_features.end());
         }
+
+        std::cout << "[INFO] Final feature dimension: " << get_feature_dim() << std::endl;
     }
 
-    // 随机打乱并分割训练集/测试集
     void shuffle_and_split()
     {
-        // 随机打乱样本
+        // 随机打乱
         auto rng = std::default_random_engine(std::random_device{}());
         std::shuffle(samples.begin(), samples.end(), rng);
 
-        // 分割训练集和测试集
+        // 分割数据集
         size_t test_size = static_cast<size_t>(samples.size() * test_ratio);
         size_t train_size = samples.size() - test_size;
 
         train_samples.assign(samples.begin(), samples.begin() + train_size);
         test_samples.assign(samples.begin() + train_size, samples.end());
 
-        std::cout << "[INFO] Split data into " << train_samples.size()
-                  << " training samples and " << test_samples.size()
-                  << " test samples." << std::endl;
+        std::cout << "[INFO] Train samples: " << train_samples.size()
+                  << ", Test samples: " << test_samples.size() << std::endl;
     }
 };
 

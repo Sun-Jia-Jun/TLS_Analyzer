@@ -7,9 +7,10 @@
 
 #include "SimpleCNN.hpp"
 #include "TLSDataProcessor.hpp"
+#include "DomainManager.hpp"
 
 // 标签到网站名称的映射
-const std::vector<std::string> SITE_NAMES = {"bing", "baidu", "bilibili"};
+const std::vector<std::string> SITE_NAMES = DomainManager::instance()->get_domains();
 const std::string MODEL_PATH = "../data/tls_model.bin";
 
 // 从单个PCAP文件加载TLS特征

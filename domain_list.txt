@@ -1,2 +1,10 @@
 www.bilibili.com
 www.baidu.com
+www.bing.com
+www.douban.com
+www.google.com
+www.csdn.net
+www.github.com
+www.gitee.com
+www.jd.com
+www.sohu.com
